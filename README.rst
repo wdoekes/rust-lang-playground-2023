@@ -356,9 +356,44 @@ Either fix works:
 Keeping track of dependencies
 -----------------------------
 
-A tricky subject: where do we keep track of source libraries so that a
-discovered security vulnerability can be resolved?
+Where do we keep track of source libraries versions so that vulnerable
+components can highlighted when security vulnerabilities have been
+discovered?
 
 *Do we need a software bill of materials (SBOM)? Do we have to generate
 it ourselves? Can Rust keep track of library (crate) versions inside the
 binaries?*
+
+A quick glance at the *crates* shows `cargo-auditable
+<https://crates.io/crates/cargo-auditable>`_. Using it should be a matter of:
+
+.. code-block:: console
+
+    $ cargo install cargo-auditable cargo-audit
+
+Build ``helloproj`` again, this time with ``cargo auditable build``:
+
+.. code-block:: console
+
+    $ cargo auditable build
+
+This adds a *JSON blob* to the binary:
+
+.. code-block:: console
+
+    $ objcopy --dump-section .dep-v0=/dev/stdout target/debug/helloproj | pigz -zd
+    {"packages":[
+      {"name":"cc","version":"1.0.79","source":"crates.io","kind":"build"},
+      {"name":"helloasm","version":"0.1.0","source":"local","dependencies":[9]},
+      {"name":"helloproj","version":"0.1.0","source":"local","dependencies":[1],"root":true},
+      {"name":"proc-macro2","version":"1.0.56","source":"crates.io","dependencies":[10]},
+      {"name":"quote","version":"1.0.26","source":"crates.io","dependencies":[3]},
+      {"name":"serde","version":"1.0.160","source":"crates.io","dependencies":[6]},
+      {"name":"serde_derive","version":"1.0.160","source":"crates.io","dependencies":[3,4,8]},
+      {"name":"serde_repr","version":"0.1.12","source":"crates.io","dependencies":[3,4,8]},
+      {"name":"syn","version":"2.0.15","source":"crates.io","dependencies":[3,4,10]},
+      {"name":"syscalls","version":"0.6.10","source":"crates.io","dependencies":[0,5,7]},
+      {"name":"unicode-ident","version":"1.0.8","source":"crates.io"}]}
+
+This is quite nice. The second thing to remember when building
+microservices with *Rust*.
