@@ -197,3 +197,99 @@ Setting default optimization options for the ``--release`` build in
 
 Now we build using ``cargo build --release``. The output is at
 ``./target/release/helloproj``.
+
+
+Dependencies
+------------
+
+Let's do this again, creating ``helloasm``, but now we create a library instead.
+
+We reimplement parts of `151-byte static Linux binary in Rust
+<http://mainisusuallyafunction.blogspot.com/2015/01/151-byte-static-linux-binary-in-rust.html>`_
+(did I mention I like small things?), just to get a feel of *Rust* low level internals.
+
+- Cargo.toml
+- build
+- Makefile
+
+While still in the ``helloasm`` directory, we can add some dependencies:
+
+.. code-block:: console
+
+    $ cargo add syscalls
+        Updating crates.io index
+          Adding syscalls v0.6.10 to dependencies.
+
+.. code-block:: console
+
+    $ tail -n2 Cargo.toml
+    [dependencies]
+    syscalls = "0.6.10"
+
+We alter ``main.rs`` to ``lib.rs``:
+
+.. code-block:: rust
+
+    use syscalls::{Sysno, syscall};
+
+    fn exit(n: usize) -> ! {
+        unsafe {
+            let _ignored_retval = syscall!(Sysno::exit, n);
+            std::hint::unreachable_unchecked();
+        }
+    }
+
+    fn write(fd: usize, buf: &[u8]) -> isize {
+        let res; // or: let r: Result<usize, Errno>;
+        unsafe {
+            res = syscall!(Sysno::write, fd, buf.as_ptr(), buf.len());
+        };
+        let ret: isize;
+        match res {
+            Ok(val) => { ret = val as isize; }
+            Err(_) => { ret = -1; },
+        };
+        ret
+    }
+
+    #[no_mangle]
+    pub fn main() {
+        write(1, "Hello, world!\n".as_bytes());
+        exit(0);
+    }
+
+We set the project output type to ``rlib`` in ``Cargo.toml``:
+
+.. code-block:: toml
+
+    [lib]
+    crate-type = ["rlib"]
+
+I added a small ``Makefile`` for convenience. Letting us fetch ``main.o``:
+
+.. code-block:: console
+
+    $ make
+    cargo build --release
+       Compiling helloasm v0.1.0 (/home/walter/srcelf/rust-lang-playground-2023/helloasm)
+        Finished release [optimized] target(s) in 0.09s
+    f=$(ar t target/release/libhelloasm.rlib | grep -vxF lib.rmeta) && \
+      ar x target/release/libhelloasm.rlib "$f" && \
+      mv "$f" main.o
+
+.. code-block:: console
+
+    $ objdump -dr main.o
+    ...
+
+    0000000000000000 <main>:
+       0:	48 8d 35 00 00 00 00 	lea    0x0(%rip),%rsi        # 7 <main+0x7>
+                            3: R_X86_64_PC32	.rodata..Lanon.fad58de7366495db4650cfefac2fcd61.0-0x4
+       7:	b8 01 00 00 00       	mov    $0x1,%eax
+       c:	bf 01 00 00 00       	mov    $0x1,%edi
+      11:	ba 0e 00 00 00       	mov    $0xe,%edx
+      16:	0f 05                	syscall
+      18:	b8 3c 00 00 00       	mov    $0x3c,%eax
+      1d:	31 ff                	xor    %edi,%edi
+      1f:	0f 05                	syscall
+      21:	0f 0b                	ud2
