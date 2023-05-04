@@ -53,7 +53,7 @@ Compile and run:
         -C lto=true -C opt-level=3 -C panic=abort
     $ stat -c%s hello
     301448
-    $ ./hello 
+    $ ./hello
     Hello World!
 
 Without the miscellaneous ``-C`` options, you'll get a (way) bigger binary.
@@ -107,25 +107,93 @@ used to support multiple arguments or differing argument types.
 
 See `variadics <https://doc.rust-lang.org/rust-by-example/macros/variadics.html>`_.
 
-A function might look like this:
+Calling a function might look like this:
 
-.. code-block::
+.. code-block:: rust
 
-    FIXME
+    fn add(a: u8, b: u8) -> u16 {
+        // thread 'main' panicked at 'attempt to add with overflow'
+        // run with `RUST_BACKTRACE=full` for a verbose backtrace
+        //let c: u16 = (a + b) as u16;
+        let c: u16 = (a as u16) + (b as u16);
+        // We can do an explicit return
+        return c;
+        // Otherwise the last statement without semi-colon is the return value
+        0xbeef
+    }
 
-- vars
-- function sigs
-- return values
+    fn main() -> () {
+        // See: https://doc.rust-lang.org/rust-by-example/hello/print.html
+        println!("add = 0x{:x}", add(255, 255));
+        // Exit with something other than 0?
+        std::process::exit(1)
+    }
+
+.. code-block:: console
+
+    $ rustc func.rs
+    $ ./func
+    add = 0x1fe
+
+What we've also learnt here, is that we want to set
+``RUST_BACKTRACE=full`` in the environment when running microservices.
+We do want full backtraces if something goes wrong.
 
 
 Cargo.toml
 ----------
 
-FIXME
+For projects that are not toy examples, we'll use ``cargo`` and a
+``Cargo.toml`` file.
 
-- cargo add
-- cargo build [--release]
-- gitignore
-- cargo new
-- edition
+Use ``cargo new`` to set up a directory:
 
+.. code-block:: console
+
+    $ cargo new helloproj
+         Created binary (application) `helloproj` package
+
+.. code-block:: console
+
+    $ find helloproj/ -type f
+    helloproj/Cargo.toml
+    helloproj/src/main.rs
+
+This includes the *Hello world* app we saw earlier and a ``Cargo.toml``
+that looks like this:
+
+.. code-block:: toml
+
+    [package]
+    name = "helloproj"
+    version = "0.1.0"
+    edition = "2021"
+
+    [dependencies]
+
+This ``edition`` setting is important. Don't omit it.
+
+.. code-block:: console
+
+    $ cd helloproj
+    $ cargo build
+       Compiling helloproj v0.1.0 (rust-lang-playground-2023/helloproj)
+        Finished dev [unoptimized + debuginfo] target(s) in 0.33s
+    $ ./target/debug/helloproj
+    Hello, world!
+
+Setting default optimization options for the ``--release`` build in
+``Cargo.toml``:
+
+.. code-block:: toml
+
+    [profile.release]
+    strip = true        # Automatically strip symbols from the binary
+                        # (don't use for microservices, you want backtraces)
+    #opt-level = "z"    # Optimize for size?
+    lto = true          # Enable Link Time Optimization (LTO)
+    codegen-units = 1   # serial build, slow, but better opt
+    #panic = "abort"    # No debug stacktrace awesomeness?
+
+Now we build using ``cargo build --release``. The output is at
+``./target/release/helloproj``.

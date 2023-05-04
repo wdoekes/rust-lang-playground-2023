@@ -1,0 +1,12 @@
+[package]
+name = "helloproj"
+version = "0.1.0"
+edition = "2021"
+
+[profile.release]
+strip = true        # Automatically strip symbols from the binary
+                    # (don't use for microservices, you want backtraces)
+#opt-level = "z"    # Optimize for size?
+lto = true          # Enable Link Time Optimization (LTO)
+codegen-units = 1   # serial build, slow, but better opt
+#panic = "abort"    # No debug stacktrace awesomeness?
