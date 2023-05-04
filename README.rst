@@ -12,6 +12,8 @@ Sections:
 * `Install`_
 * `Variables and functions`_
 * `Cargo.toml`_
+* `Dependencies`_
+* `Keeping track of dependencies`_
 
 
 Install
@@ -208,10 +210,6 @@ We reimplement parts of `151-byte static Linux binary in Rust
 <http://mainisusuallyafunction.blogspot.com/2015/01/151-byte-static-linux-binary-in-rust.html>`_
 (did I mention I like small things?), just to get a feel of *Rust* low level internals.
 
-- Cargo.toml
-- build
-- Makefile
-
 While still in the ``helloasm`` directory, we can add some dependencies:
 
 .. code-block:: console
@@ -293,3 +291,74 @@ I added a small ``Makefile`` for convenience. Letting us fetch ``main.o``:
       1d:	31 ff                	xor    %edi,%edi
       1f:	0f 05                	syscall
       21:	0f 0b                	ud2
+
+Okay. This demonstrates that we can write (close to) assembler code.
+This is totally not useful for common programming tasks.
+
+Can we call this from other *Rust* code?
+
+If we go back to ``helloproj``, we can add dependencies to our *local project*:
+
+.. code-block:: toml
+
+    [dependencies]
+    helloasm = { path = "../helloasm" }
+
+In this particular case, we used ``#[no_mangle]`` in ``helloasm`` to
+avoid getting a name like ``_ZN8helloasm4main17h7914df8e74e71984E``.
+
+Now we'd get a duplicate name when changing our *Hello world* application:
+
+.. code-block:: rust
+
+    fn main() {
+        helloasm::main();
+    }
+
+.. code-block::
+
+    error: entry symbol `main` declared multiple times
+     --> src/main.rs:1:1
+      |
+    1 | fn main() {
+      | ^^^^^^^^^
+      |
+      = help: did you use `#[no_mangle]` on `fn main`? Use `#[start]` instead
+
+If we want to be able to call into ``helloasm`` from ``helloproj``,
+we'll have to mangle (remove ``no_mangle``) or rename the function:
+
+.. code-block:: rust
+
+    #[no_mangle]
+    pub fn any_name_except_main() {
+        write(1, "Hello, world, using syscalls!\n".as_bytes());
+        exit(0);
+    }
+
+.. code-block:: rust
+
+    pub fn main() {
+        write(1, "Hello, world, using syscalls!\n".as_bytes());
+        exit(0);
+    }
+
+Either fix works:
+
+.. code-block:: console
+
+    $ ./target/debug/helloproj
+    Hello, world, using syscalls!
+
+*And that concludes basic cargo and library usage.*
+
+
+Keeping track of dependencies
+-----------------------------
+
+A tricky subject: where do we keep track of source libraries so that a
+discovered security vulnerability can be resolved?
+
+*Do we need a software bill of materials (SBOM)? Do we have to generate
+it ourselves? Can Rust keep track of library (crate) versions inside the
+binaries?*

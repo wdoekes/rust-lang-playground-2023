@@ -10,3 +10,6 @@ strip = true        # Automatically strip symbols from the binary
 lto = true          # Enable Link Time Optimization (LTO)
 codegen-units = 1   # serial build, slow, but better opt
 #panic = "abort"    # No debug stacktrace awesomeness?
+
+[dependencies]
+helloasm = { path = "../helloasm" }

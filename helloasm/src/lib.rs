@@ -21,6 +21,12 @@ fn write(fd: usize, buf: &[u8]) -> isize {
 }
 
 #[no_mangle]
+pub fn any_name_except_main() {
+    write(1, "Hello, world, using syscalls!\n".as_bytes());
+    exit(0);
+}
+
+//#[no_mangle]
 pub fn main() {
     write(1, "Hello, world, using syscalls!\n".as_bytes());
     exit(0);
