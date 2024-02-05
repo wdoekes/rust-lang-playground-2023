@@ -1,0 +1,22 @@
+[package]
+name = "loki2nats"
+edition = "2021"
+version = "0.1.0"
+#authors = ["Alice <a@example.com>", "Bob <b@example.com>"]
+
+# https://github.com/johnthagen/min-sized-rust
+# cargo build            # (7M)
+# cargo build --release  # (4M, or 300K after strip=true)
+[profile.release]
+strip = true        # Automatically strip symbols from the binary
+#opt-level = "z"    # Optimize for size?
+lto = true	    # Enable Link Time Optimization (LTO)
+codegen-units = 1   # Serial build. Slow, but better opt
+#panic = "abort"    # No debug stacktrace awesomeness?
+
+[dependencies]
+native-tls = "0.2"
+tungstenite = "0.13.0"
+serde_json = "1.0"
+url = "2.2.2"
+urlencoding = "2.0.1"
