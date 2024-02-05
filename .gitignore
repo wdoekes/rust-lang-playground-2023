@@ -3,5 +3,6 @@ Cargo.lock
 
 *.crt
 *.key
+*.pfx
 
 /*/target
