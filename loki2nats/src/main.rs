@@ -1,12 +1,15 @@
 use std::env;
 use std::error::Error;
 use std::fs::File;
-use std::io::{Read, Write};
-use std::net::TcpStream;
+use std::io::Read;
 
-use native_tls::{Identity, TlsConnector};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpStream;
+use tokio_native_tls::native_tls::{Identity, TlsConnector};
+use tokio_native_tls::TlsConnector as TokioTlsConnector;
 
-fn main() -> Result<(), Box<dyn Error>> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = env::args().collect();
     if args.len() < 3 {
         let argv0 = &args[0];
@@ -26,19 +29,20 @@ fn main() -> Result<(), Box<dyn Error>> {
     client_pfx_file.read_to_end(&mut client_pfx_buf)?;
 
     let identity = Identity::from_pkcs12(&client_pfx_buf, "")?;
-    let connector = TlsConnector::builder().identity(identity).build()?;
+    let native_connector = TlsConnector::builder().identity(identity).build()?;
+    let connector = TokioTlsConnector::from(native_connector);
 
-    let stream = TcpStream::connect((hostname.clone(), 443))?;
-    let mut stream = connector.connect(hostname, stream)?;
+    let stream = TcpStream::connect((hostname.clone(), 443)).await?;
+    let mut stream = connector.connect(hostname, stream).await?;
 
     let request = format!(
         "GET /ready HTTP/1.1\r\nConnection: close\r\nHost: {}\r\n\r\n",
         hostname
     );
 
-    stream.write_all(request.as_bytes()).unwrap();
+    stream.write_all(request.as_bytes()).await?;
     let mut res = vec![];
-    stream.read_to_end(&mut res).unwrap();
+    stream.read_to_end(&mut res).await?;
     println!("{}", String::from_utf8_lossy(&res));
 
     Ok(())
