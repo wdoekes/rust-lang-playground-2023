@@ -1,28 +1,22 @@
-use std::env;
 use std::collections::HashMap;
-use serde_json::Map;
+use std::env;
 use std::error::Error;
-use std::future::Future;
+use std::fs::File;
+use std::io::Read;
+use std::net::TcpStream;
 use std::str;
 use url::Url;
 
-use tokio::io::{AsyncReadExt};
-use tokio::fs::File;
-use tokio::net::TcpStream;
+use native_tls::{Identity, TlsConnector};
+use native_tls::TlsStream;
 
-use tokio_native_tls::native_tls::{Identity, TlsConnector};
-use tokio_native_tls::TlsStream;
-use tokio_native_tls::TlsConnector as TokioTlsConnector;
+use tungstenite::client as ws_client;
+use tungstenite::WebSocket;
 
-use anyhow::Result;
-use fastwebsockets::FragmentCollector;
-use fastwebsockets::handshake;
-use http_body_util::Empty;
-use hyper::{Request, body::Bytes, upgrade::Upgraded, header::{UPGRADE, CONNECTION}};
-use hyper_util::rt::TokioIo;
+use serde_json::{self, Map};
 
-use serde_json;
-
+//type TlsWebSocket = WebSocket<MaybeTlsStream<TcpStream>>;
+type TlsWebSocket = WebSocket<TlsStream<TcpStream>>;
 
 #[allow(dead_code)]    // don't complain that we do not use these fields
 #[derive(Debug)]    // we use these fields when doing a Debug-print {:?}
@@ -37,28 +31,21 @@ struct LokiMsg {
 }
 
 struct LokiStreamReader {
-    ws: FragmentCollector<TokioIo<Upgraded>>,
+    ws: TlsWebSocket,
     loki_id: String,
 }
 
 impl LokiStreamReader {
-    async fn handle_messages(&mut self) -> Result<(), Box<dyn Error>> {
+    fn handle_messages(&mut self) -> Result<(), Box<dyn Error>> {
         let mut total = 0;
 
         loop {
-            let frame = self.ws.read_frame().await?;
-            let data: String;
-            match frame.opcode {
-                fastwebsockets::OpCode::Text => {
-                    data = String::from_utf8_lossy(&frame.payload).to_string();
-                }
-                _ => {
-                    panic!("got unexpected opcode {:?}", frame.opcode);
-                }
-            }
+            let msg = self.ws.read()?;
+            let data = msg.into_text()?;
 
             if data.is_empty() {
-                break;
+                eprintln!("EMPTY");
+                continue;
             }
 
             let data: HashMap<String, serde_json::Value> = serde_json::from_str(&data)?;
@@ -94,8 +81,6 @@ impl LokiStreamReader {
                 eprintln!("DROPPED (!) {}", dropped.len());
             }
         }
-
-        Ok(())
     }
 
     fn extract_log_sources(&self, labels: &Map<String, serde_json::Value>) -> Result<(String, String, String), Box<dyn Error>> {
@@ -137,59 +122,32 @@ impl LokiStreamReader {
     }
 }
 
-async fn ws_client_connect(websocket_url: &str) -> Result<FragmentCollector<TokioIo<Upgraded>>, Box<dyn Error>> {
+fn ws_client_connect(websocket_url: &str) -> Result<TlsWebSocket, Box<dyn Error>> {
     let url = Url::parse(websocket_url).unwrap();
     let hostname = url.domain().unwrap();
     let port = url.port().unwrap_or(443);
 
     // This is needed. The from_pkcs8() does not grok our crt+key.
     // openssl pkcs12 -export -out loki_client.pfx -inkey loki_client.key -in loki_client.crt
-    let mut client_pfx_file = File::open("examples/loki_client.pfx").await?;
+    let mut client_pfx_file = File::open("examples/loki_client.pfx")?;
     let mut client_pfx_buf = Vec::new();
-    client_pfx_file.read_to_end(&mut client_pfx_buf).await?;
+    client_pfx_file.read_to_end(&mut client_pfx_buf)?;
     drop(client_pfx_file);
 
     let identity = Identity::from_pkcs12(&client_pfx_buf, "")?;
-    let native_connector = TlsConnector::builder().identity(identity).build()?;
-    let connector = TokioTlsConnector::from(native_connector);
+    let connector = TlsConnector::builder().identity(identity).build()?;
 
     // Connect to the WebSocket server
-    let tcp_stream: TcpStream = TcpStream::connect((hostname, port)).await?;
-    let tls_stream: TlsStream<TcpStream> = connector.connect(hostname, tcp_stream).await?;
+    let tcp_stream: TcpStream = TcpStream::connect((hostname, port))?;
+    let tls_stream: TlsStream<TcpStream> = connector.connect(hostname, tcp_stream)?;
 
-    let req = Request::builder()
-        .method("GET")
-        .uri(websocket_url)
-        .header("Host", hostname)
-        .header(UPGRADE, "websocket")
-        .header(CONNECTION, "upgrade")
-        .header(
-            "Sec-WebSocket-Key",
-            fastwebsockets::handshake::generate_key(),
-            )
-        .header("Sec-WebSocket-Version", "13")
-        .body(Empty::<Bytes>::new())?;
+    let (ws, _response) = ws_client(websocket_url, tls_stream)?;
+    //println!("response: {_response:?}");
 
-    let (ws, _response) = handshake::client(&SpawnExecutor, req, tls_stream).await?;
-
-    Ok(FragmentCollector::new(ws))
+    Ok(ws)
 }
 
-// Tie hyper's executor to tokio runtime
-struct SpawnExecutor;
-
-impl<Fut> hyper::rt::Executor<Fut> for SpawnExecutor
-where
-Fut: Future + Send + 'static,
-Fut::Output: Send + 'static,
-{
-    fn execute(&self, fut: Fut) {
-        tokio::task::spawn(fut);
-    }
-}
-
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
+fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = env::args().collect();
     if args.len() < 3 {
         let argv0 = &args[0];
@@ -203,12 +161,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let websocket_url = format!("wss://{}/loki/api/v1/tail?limit=1&query={}&start=0", hostname, filter_encoded);
 
-    let ws = ws_client_connect(&websocket_url).await?;
+    let ws = ws_client_connect(&websocket_url)?;
 
     let loki_id = hostname.to_string();
     let mut rd = LokiStreamReader { ws, loki_id };
 
-    rd.handle_messages().await?;
+    rd.handle_messages()?;
 
     Ok(())
 }
