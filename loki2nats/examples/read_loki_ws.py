@@ -123,7 +123,7 @@ def main():
     certfile = 'loki_client.crt'
     keyfile = 'loki_client.key'
 
-    if 0:
+    if 1:
         enableTrace(True)
 
     websocket_builder = WebsocketBuilder(websocket_url)

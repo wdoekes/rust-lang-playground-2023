@@ -15,6 +15,12 @@ use tungstenite::WebSocket;
 
 use serde_json::{self, Map};
 
+#[cfg(unix)]
+use std::os::unix::io::AsRawFd;
+#[cfg(unix)]
+use libc::{c_ulong, ioctl, FIONBIO};
+use libc::{setsockopt, SOL_SOCKET, SO_KEEPALIVE};
+
 //type TlsWebSocket = WebSocket<MaybeTlsStream<TcpStream>>;
 type TlsWebSocket = WebSocket<TlsStream<TcpStream>>;
 
@@ -33,6 +39,32 @@ struct LokiMsg {
 struct LokiStreamReader {
     ws: TlsWebSocket,
     loki_id: String,
+}
+
+#[cfg(unix)]
+fn set_non_blocking<T>(socket: &T, mut non_blocking: isize) -> std::io::Result<()> where T: AsRawFd {
+    let fd = socket.as_raw_fd();
+    unsafe {
+        let result = ioctl(fd, FIONBIO, &mut non_blocking as *mut _ as *mut c_ulong);
+        if result == -1 {
+            return Err(std::io::Error::last_os_error());
+        }
+    }
+    Ok(())
+}
+
+fn set_keepalive(stream: &TcpStream, value: u32) -> std::io::Result<()> {
+    let fd = stream.as_raw_fd();
+    unsafe {
+        let result = setsockopt(
+            fd, SOL_SOCKET, SO_KEEPALIVE,
+            &value as *const _ as *const std::ffi::c_void,
+            std::mem::size_of::<u32>() as u32);
+        if result == -1 {
+            return Err(std::io::Error::last_os_error());
+        }
+    }
+    Ok(())
 }
 
 impl LokiStreamReader {
@@ -72,7 +104,7 @@ impl LokiStreamReader {
                     let loki_msg = self.make_lokimsg(labels, value)?;
                     println!("{} {:?}", total, loki_msg);
                     println!();
-                    total += 1
+                    total += 1;
                 }
             }
 
@@ -139,6 +171,8 @@ fn ws_client_connect(websocket_url: &str) -> Result<TlsWebSocket, Box<dyn Error>
 
     // Connect to the WebSocket server
     let tcp_stream: TcpStream = TcpStream::connect((hostname, port))?;
+    set_keepalive(&tcp_stream, 1)?;         // not needed
+    set_non_blocking(&tcp_stream, 0)?;      // not needed
     let tls_stream: TlsStream<TcpStream> = connector.connect(hostname, tcp_stream)?;
 
     let (ws, _response) = ws_client(websocket_url, tls_stream)?;
@@ -159,7 +193,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     let filter_ = &args[2];
     let filter_encoded = urlencoding::encode(filter_);
 
-    let websocket_url = format!("wss://{}/loki/api/v1/tail?limit=1&query={}&start=0", hostname, filter_encoded);
+    let websocket_url = format!(
+        "wss://{}/loki/api/v1/tail?limit=1&query={}&start=1707222222000000000",
+        hostname, filter_encoded);
 
     let ws = ws_client_connect(&websocket_url)?;
 
