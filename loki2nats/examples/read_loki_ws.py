@@ -7,7 +7,7 @@ from ssl import CERT_REQUIRED, Purpose, create_default_context
 from socket import AF_INET, SOCK_STREAM, SOL_SOCKET, SO_KEEPALIVE, socket
 from urllib.parse import urlparse, quote
 
-from websocket import create_connection
+from websocket import create_connection, enableTrace
 
 
 class WebsocketBuilder:
@@ -34,7 +34,7 @@ class WebsocketBuilder:
         sslsock = self.get_ssl_context().wrap_socket(
             sock, server_hostname=hostname)
         sslsock.setsockopt(SOL_SOCKET, SO_KEEPALIVE, 1)
-        sslsock.connect((hostname, 443))
+        sslsock.connect((hostname, port))
 
         return create_connection(self.websocket_url, socket=sslsock)
 
@@ -79,8 +79,8 @@ class LokiStreamReader:
                     yield self.make_lokimsg(labels, value)
 
             print('HANDLED', handled_entries, file=sys.stderr)
-            if dropped_entries: 
-                print('DROPPED', len(dropped_entries), file=sys.stderr)
+            if dropped_entries:
+                print('DROPPED (!)', len(dropped_entries), file=sys.stderr)
 
     def extract_log_sources(self, labels):
         tenant = labels['tenant']
@@ -112,16 +112,19 @@ class LokiStreamReader:
             struct_data)
 
 
-
-
 def main():
     hostname = sys.argv[1]
     filter_ = sys.argv[2]   # {host!=""}, {host!="", tenant="sometenant"}
 
     filter_ = quote(filter_)
-    websocket_url = f'wss://{hostname}/loki/api/v1/tail?limit=1&query={filter_}&start=0'
+    websocket_url = (
+        f'wss://{hostname}/loki/api/v1/tail?limit=1&query={filter_}'
+        f'&start=1707222222000000000')
     certfile = 'loki_client.crt'
     keyfile = 'loki_client.key'
+
+    if 0:
+        enableTrace(True)
 
     websocket_builder = WebsocketBuilder(websocket_url)
     websocket_builder.get_ssl_context().load_cert_chain(
