@@ -4,7 +4,7 @@ use std::error::Error;
 use std::fs::File;
 use std::io::Read;
 use std::net::TcpStream;
-use std::str;
+use std::time::{SystemTime, UNIX_EPOCH};
 use url::Url;
 
 use native_tls::{Identity, TlsConnector};
@@ -24,7 +24,7 @@ use libc::{setsockopt, SOL_SOCKET, SO_KEEPALIVE};
 //type TlsWebSocket = WebSocket<MaybeTlsStream<TcpStream>>;
 type TlsWebSocket = WebSocket<TlsStream<TcpStream>>;
 
-#[allow(dead_code)]    // don't complain that we do not use these fields
+#[allow(dead_code)] // don't complain that we do not use these fields
 #[derive(Debug)]    // we use these fields when doing a Debug-print {:?}
 struct LokiMsg {
     tenant: String,
@@ -161,7 +161,7 @@ fn ws_client_connect(websocket_url: &str) -> Result<TlsWebSocket, Box<dyn Error>
 
     // This is needed. The from_pkcs8() does not grok our crt+key.
     // openssl pkcs12 -export -out loki_client.pfx -inkey loki_client.key -in loki_client.crt
-    let mut client_pfx_file = File::open("examples/loki_client.pfx")?;
+    let mut client_pfx_file = File::open("./loki_client.pfx")?;
     let mut client_pfx_buf = Vec::new();
     client_pfx_file.read_to_end(&mut client_pfx_buf)?;
     drop(client_pfx_file);
@@ -181,6 +181,12 @@ fn ws_client_connect(websocket_url: &str) -> Result<TlsWebSocket, Box<dyn Error>
     Ok(ws)
 }
 
+fn get_current_nanotime() -> u128 {
+    let now = SystemTime::now();
+    let unix_timestamp = now.duration_since(UNIX_EPOCH).expect("Time went backwards");
+    unix_timestamp.as_nanos()
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = env::args().collect();
     if args.len() < 3 {
@@ -194,8 +200,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     let filter_encoded = urlencoding::encode(filter_);
 
     let websocket_url = format!(
-        "wss://{}/loki/api/v1/tail?limit=1&query={}&start=1707222222000000000",
-        hostname, filter_encoded);
+        "wss://{}/loki/api/v1/tail?limit={}&query={}&query_log=5&start={}",
+        hostname, 1, filter_encoded, get_current_nanotime());
 
     let ws = ws_client_connect(&websocket_url)?;
 

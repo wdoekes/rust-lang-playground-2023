@@ -5,6 +5,7 @@ from collections import namedtuple
 from json import loads
 from ssl import CERT_REQUIRED, Purpose, create_default_context
 from socket import AF_INET, SOCK_STREAM, SOL_SOCKET, SO_KEEPALIVE, socket
+from time import time
 from urllib.parse import urlparse, quote
 
 from websocket import create_connection, enableTrace
@@ -117,13 +118,15 @@ def main():
     filter_ = sys.argv[2]   # {host!=""}, {host!="", tenant="sometenant"}
 
     filter_ = quote(filter_)
+    limit = 1
+    unixtime_ms = int(time() * 1000)
     websocket_url = (
-        f'wss://{hostname}/loki/api/v1/tail?limit=1&query={filter_}'
-        f'&start=1707222222000000000')
-    certfile = 'loki_client.crt'
-    keyfile = 'loki_client.key'
+        f'wss://{hostname}/loki/api/v1/tail?limit={limit}&query={filter_}'
+        f'&query_log=5&start={unixtime_ms}000000')
+    certfile = './loki_client.crt'
+    keyfile = './loki_client.key'
 
-    if 1:
+    if 0:
         enableTrace(True)
 
     websocket_builder = WebsocketBuilder(websocket_url)
