@@ -2,6 +2,7 @@
 import sys
 
 from collections import namedtuple
+from datetime import datetime
 from json import loads
 from ssl import CERT_REQUIRED, Purpose, create_default_context
 from socket import AF_INET, SOCK_STREAM, SOL_SOCKET, SO_KEEPALIVE, socket
@@ -40,9 +41,45 @@ class WebsocketBuilder:
         return create_connection(self.websocket_url, socket=sslsock)
 
 
-LokiMsg = namedtuple(
-    'LokiMsg',
-    'tenant src_loki src_host src_log nanotime raw_data struct_data')
+class LokiMsg(namedtuple(
+        'LokiMsg',
+        'tenant src_loki src_host src_log nanotime raw_data struct_data')):
+
+    def as_cloudevent_js(self):
+        # https://github.com/cloudevents/spec/blob/main/cloudevents/spec.md#
+        #   +#context-attributes
+        #   +#event-data
+        dt = datetime.utcfromtimestamp(int(self.nanotime) / 1_000_000_000)
+        rfc3339_time = dt.isoformat() + 'Z'
+        event = {
+            # Producers MUST ensure that source + id is unique for each
+            # distinct event.
+            'id': '{}/{}/{}'.format(
+                self.nanotime, self.src_host, self.src_log),
+            # An absolute URI is RECOMMENDED.
+            'source': 'https+loki://{}/{}/osso-ops/{}'.format(
+                self.src_loki, self.src_host, self.tenant),
+            # Compliant event producers MUST use a value of 1.0 when ...
+            'specversion': '1.0',
+            # SHOULD be prefixed with a reverse-DNS name.
+            'type': 'nl.osso.spec.alpha.loki2nats',
+            # [...] a JSON-format event with no datacontenttype is exactly
+            # equivalent to one with datacontenttype="application/json".
+            # #'datacontenttype': 'application/json',
+            # "E.g. mynewfile.jpg", or in our case the filename/systemd_unit.
+            'subject': self.src_log,
+            # Optional. But we do have a time, so use it.
+            'time': rfc3339_time,
+        }
+        if self.struct_data:
+            assert not self.raw_data, self
+            event['datacontenttype'] = 'application/json'
+            event['data'] = self.struct_data
+        else:
+            event['datacontenttype'] = 'text/plain'
+            event['data'] = self.raw_data
+
+        return event
 
 
 class LokiStreamReader:
@@ -136,7 +173,7 @@ def main():
 
     rd = LokiStreamReader(ws, loki_id=hostname)
     for idx, logmsg in enumerate(rd.messages()):
-        print(idx, logmsg)
+        print(idx, logmsg.as_cloudevent_js())
         print()
 
 
